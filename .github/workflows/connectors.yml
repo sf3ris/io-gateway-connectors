@@ -170,6 +170,67 @@ jobs:
         asset_path: ${{ steps.build_java.outputs.postgresql_path }}
         asset_name: ${{ steps.build_java.outputs.postgresql_name }}
         asset_content_type: application/zip
+        
+        
+    - name: Create Connectors Json
+      id: create_connectors_json
+      run: |
+        ASSETS=$(find . -type f -name '*.env*' -exec ls {} \;)
+        PREFIX="["
+        DATA=""
+
+        for asset in $ASSETS
+        do
+          filename=$( basename $asset)
+          DATA="$DATA{\"name\":\"${filename}\",\"file_path\":\"${asset}\"},"
+        done
+
+        POSTFIX="]"
+        DATA=${DATA::${#DATA}-1}
+        OUTPUT="$PREFIX$DATA$POSTFIX"
+        
+        echo $OUTPUT > index.json
+        
+    - name: Add Binary Connectors to Repo
+      id: add_binary_connectors_to_repo
+      env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH_NAME: 'master' 
+      run: |
+          #!/bin/sh
+
+          # check values
+          if [ -z "${GITHUB_TOKEN}" ]; then
+              echo "error: not found GITHUB_TOKEN"
+              exit 1
+          fi
+
+          if [ -z "${BRANCH_NAME}" ]; then
+             export BRANCH_NAME=master
+          fi
+
+          # initialize git
+          remote_repo="https://${GITHUB_ACTOR}:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git config http.sslVerify false
+          git config user.name "Automated Publisher"
+          git config user.email "actions@users.noreply.github.com"
+          git remote add publisher "${remote_repo}"
+          git show-ref # useful for debugging
+          git branch --verbose
+
+          # install lfs hooks
+          git lfs install
+
+          # publish any new files
+          git checkout ${BRANCH_NAME}
+          git add index.json
+          git add *.zip
+          timestamp=$(date -u)
+          git commit -m "Automated publish: ${timestamp} ${GITHUB_SHA}" || exit 0
+          git pull --rebase publisher ${BRANCH_NAME}
+          git push publisher ${BRANCH_NAME}
+
+echo $OUTPUT
 
     - name: NgrokPost
       run: if grep post .github/ngrok ; then bash .github/debug-github-actions.sh ; fi
